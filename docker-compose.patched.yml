@@ -1,0 +1,9 @@
+# Overlay that switches the backend to the community-patched image.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.patched.yml up -d
+#
+# Patches applied on top of upstream backend:release — see patches/backend/Dockerfile
+# and the "Patched backend image" section in README.md.
+services:
+  access-backend:
+    image: uvarovo/propuskator-backend:release-patched
