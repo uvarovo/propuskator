@@ -1,0 +1,65 @@
+name: build-patched-backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: 'Upstream backend tag to patch on top of'
+        required: false
+        default: 'release'
+      patched_tag:
+        description: 'Tag for the resulting patched image'
+        required: false
+        default: 'release-patched'
+  push:
+    paths:
+      - 'patches/backend/**'
+      - '.github/workflows/build-patched-backend.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tags
+        id: tags
+        run: |
+          BASE_TAG="${{ github.event.inputs.base_tag || 'release' }}"
+          PATCHED_TAG="${{ github.event.inputs.patched_tag || 'release-patched' }}"
+          DATE_TAG="${PATCHED_TAG}-$(date -u +%Y%m%d)"
+          {
+            echo "base_tag=${BASE_TAG}"
+            echo "patched_tag=${PATCHED_TAG}"
+            echo "date_tag=${DATE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push patched backend
+        uses: docker/build-push-action@v5
+        with:
+          context: patches/backend
+          file: patches/backend/Dockerfile
+          build-args: |
+            BASE_IMAGE=uvarovo/propuskator-backend:${{ steps.tags.outputs.base_tag }}
+          push: true
+          tags: |
+            uvarovo/propuskator-backend:${{ steps.tags.outputs.patched_tag }}
+            uvarovo/propuskator-backend:${{ steps.tags.outputs.date_tag }}
+            ghcr.io/uvarovo/propuskator-backend:${{ steps.tags.outputs.patched_tag }}
+            ghcr.io/uvarovo/propuskator-backend:${{ steps.tags.outputs.date_tag }}

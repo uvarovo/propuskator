@@ -194,6 +194,70 @@ it **out of this repo**; `system/keys/*.gpg` is in `.gitignore`.
 
 ---
 
+## Patched backend image (optional)
+
+A community-patched build of the backend is published as
+`uvarovo/propuskator-backend:release-patched` (and `ghcr.io/uvarovo/propuskator-backend:release-patched`).
+It applies several small fixes on top of the stock upstream backend:
+
+- **Transaction propagation.** `findOne({...}, { transaction })` was being
+  called with the transaction as a 2nd arg — ignored by Sequelize. Fixed in
+  `services/mobile/accessSubjectTokens/{AttachWithId,AttachWithName,Detach}.js`
+  and `services/admin/accessSubjectTokens/BulkCreate.js`. Closes a TOCTOU race
+  when two clients attach the same token concurrently.
+- **Workspace-scoped access-log total.** `AccessLogList` used a bare
+  `AccessLog.count()` without a `workspaceId` filter, which both leaked the
+  global row count and forced a full table scan. Now scoped to the caller's
+  workspace.
+- **S3 rollback errors no longer silently swallowed** in
+  `services/tokenReader/v1/accessLogs/Save.js` — failures in the media-upload
+  rollback path now get logged.
+- **Timezone validator accepts IANA names.** `services/utils/timezones.js` now
+  recognises common IANA names (`Europe/Kiev`, `Europe/Kyiv`, `Etc/UTC`,
+  `UTC`, `GMT`, ...) in addition to the Windows-style `(UTC…) …` labels. The
+  stock UI registration form sends IANA, so the stock combination was broken
+  out of the box.
+- **N+1 micro-fix.** `BulkCreate` no longer wraps a single condition in
+  `[Op.or]`.
+
+Operationally, besides the backend patch, also run these two indexes on
+MySQL to make the admin list queries fast on populated databases — the stock
+schema is missing them:
+
+```sql
+ALTER TABLE accesslogs    ADD INDEX idx_ws_created (workspaceId, createdAt);
+ALTER TABLE notifications ADD INDEX idx_ws_created (workspaceId, createdAt);
+```
+
+### Using the patched image
+
+Overlay `docker-compose.patched.yml` on top of the base compose file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.patched.yml up -d
+```
+
+The overlay only swaps the `access-backend` image; everything else is
+unchanged. To go back to the stock image just drop the `-f
+docker-compose.patched.yml` argument.
+
+### Rebuilding the patched image
+
+The patch sources live in `patches/backend/`. A `Dockerfile` there overlays
+the patched files on top of `uvarovo/propuskator-backend:release`. Rebuild
+with:
+
+```bash
+cd patches/backend
+docker build -t uvarovo/propuskator-backend:release-patched \
+  --build-arg BASE_IMAGE=uvarovo/propuskator-backend:release .
+```
+
+Or trigger `build-patched-backend.yml` from the Actions tab to publish to
+Docker Hub + GHCR.
+
+---
+
 ## Upgrading
 
 Pull new `:release` images and re-create containers:
