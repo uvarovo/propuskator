@@ -212,11 +212,14 @@ It applies several small fixes on top of the stock upstream backend:
 - **S3 rollback errors no longer silently swallowed** in
   `services/tokenReader/v1/accessLogs/Save.js` — failures in the media-upload
   rollback path now get logged.
-- **Timezone validator accepts IANA names.** `services/utils/timezones.js` now
-  recognises common IANA names (`Europe/Kiev`, `Europe/Kyiv`, `Etc/UTC`,
-  `UTC`, `GMT`, ...) in addition to the Windows-style `(UTC…) …` labels. The
-  stock UI registration form sends IANA, so the stock combination was broken
-  out of the box.
+- **Timezone validator accepts IANA names and numeric UTC offsets.**
+  `services/utils/timezones.js` now recognises common IANA names
+  (`Europe/Kiev`, `Europe/Kyiv`, `Etc/UTC`, `UTC`, `GMT`, ...) in addition to
+  the Windows-style `(UTC…) …` labels. `services/admin/adminUsers/Register.js`
+  and `services/admin/workspaceSettings/Update.js` additionally accept a
+  numeric UTC offset (`timezone: 0` → UTC, `timezone: 3` → UTC+03:00, etc.) —
+  which is what the stock UI registration / workspace-settings form actually
+  submits. Without this patch, the stock UI cannot register the first admin.
 - **N+1 micro-fix.** `BulkCreate` no longer wraps a single condition in
   `[Op.or]`.
 

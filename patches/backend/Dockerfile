@@ -8,7 +8,9 @@
 #   * S3-upload rollback error no longer silently swallowed
 #     (tokenReader/v1/accessLogs/Save.js)
 #   * timezone validator accepts IANA names (Europe/Kiev, Etc/UTC, ...)
-#     in addition to Windows-style labels (utils/timezones.js)
+#     and numeric UTC offsets (the UI submits `timezone: 0` etc.)
+#     in addition to Windows-style labels (utils/timezones.js,
+#     admin/adminUsers/Register.js, admin/workspaceSettings/Update.js)
 #
 # See ../../README.md → "Patched backend image" for details.
 
@@ -30,3 +32,7 @@ COPY lib/services/tokenReader/v1/accessLogs/Save.js \
      /app/lib/services/tokenReader/v1/accessLogs/Save.js
 COPY lib/services/utils/timezones.js \
      /app/lib/services/utils/timezones.js
+COPY lib/services/admin/adminUsers/Register.js \
+     /app/lib/services/admin/adminUsers/Register.js
+COPY lib/services/admin/workspaceSettings/Update.js \
+     /app/lib/services/admin/workspaceSettings/Update.js

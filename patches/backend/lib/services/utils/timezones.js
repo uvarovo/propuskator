@@ -1529,10 +1529,32 @@ const timezones_names = [
     ...Object.keys(timezones_iana_hash)
 ];
 
+// The stock UI register form submits `timezone` as a numeric UTC offset in hours
+// (`0` for UTC, `3` for UTC+3, `-5` for UTC-05:00, etc.) rather than a name, so
+// the validator also has to accept numbers.
+const timezones_offset_hash = {};
+
+for (const entry of timezones) {
+    const offset = Number(entry.offset);
+
+    if (!Number.isFinite(offset)) continue;
+    if (!timezones_offset_hash[offset]) timezones_offset_hash[offset] = entry;
+}
+
+const timezones_offsets = Object.keys(timezones_offset_hash).map(v => Number(v));
+
+const timezones_names_and_offsets = [
+    ...timezones_names,
+    ...timezones_offsets
+];
 
 export function getTimezoneInfoByName(name) {
+    if (typeof name === 'number' && Number.isFinite(name)) {
+        return timezones_offset_hash[name];
+    }
+
     return timezones_hash[name] || timezones_iana_hash[name];
 }
 export function getTimezoneNames() {
-    return timezones_names;
+    return timezones_names_and_offsets;
 }
