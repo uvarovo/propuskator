@@ -1532,14 +1532,28 @@ const timezones_names = [
 // The stock UI register form submits `timezone` as a numeric UTC offset in hours
 // (`0` for UTC, `3` for UTC+3, `-5` for UTC-05:00, etc.) rather than a name, so
 // the validator also has to accept numbers.
+//
+// A single numeric offset maps to many Windows-style labels. Pick a stable
+// canonical one per offset:
+//   * always prefer non-DST entries (DST entries have misleading offsets --
+//     e.g. "Azores Standard Time" has offset 0 because its DST is UTC+0,
+//     but it is really UTC-1 in standard time)
+//   * for offset 0 specifically, force the canonical "(UTC) Coordinated
+//     Universal Time" label
 const timezones_offset_hash = {};
 
 for (const entry of timezones) {
     const offset = Number(entry.offset);
 
     if (!Number.isFinite(offset)) continue;
+    if (entry.isdst) continue;
     if (!timezones_offset_hash[offset]) timezones_offset_hash[offset] = entry;
 }
+
+// `utc_entry` is already declared above (the "(UTC) Coordinated Universal Time"
+// entry used for IANA aliases). Reuse it here to pin the canonical label for
+// numeric offset 0.
+if (utc_entry) timezones_offset_hash[0] = utc_entry;
 
 const timezones_offsets = Object.keys(timezones_offset_hash).map(v => Number(v));
 
