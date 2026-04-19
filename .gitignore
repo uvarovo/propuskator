@@ -1,0 +1,30 @@
+# secrets — never commit
+.env
+.env_modbus
+.env.local
+
+# generated runtime state
+system/mysql/
+system/minio/
+system/media/
+system/storage/
+system/backups/
+system/releases/
+system/shared/
+system/emqx/
+system/ssl/
+system/updater/state.json
+system/google-home/
+
+# PGP keys for backup encryption — keep out of repo
+system/keys/*.gpg
+system/keys/*.key
+system/keys/*.pem
+system/uvarovo_ssl/
+
+# editor / os
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo

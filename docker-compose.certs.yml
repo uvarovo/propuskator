@@ -1,0 +1,20 @@
+version: '3.7'
+
+services:
+  google-home: &empty-service
+    image: busybox
+    restart: "no"
+    entrypoint: "/bin/sh -c 'echo STOP!'"
+  telegram-bot: *empty-service
+  access-nginx:
+    volumes:
+      - ${ROOT_DIR:-.}/system/uvarovo_ssl/uvarovo.net.chain:/etc/nginx/ssl/certs/server-cert.pem
+      - ${ROOT_DIR:-.}/system/uvarovo_ssl/uvarovo.net.key:/etc/nginx/ssl/private/server-key.pem
+  ssl-certs:
+    entrypoint: "/bin/sh -c 'echo STOP!'"
+  access-backend:
+    environment:
+      - NOTIFICATION_ALIVE_PERIOD_SECONDS=86400
+    volumes:
+      - ${ROOT_DIR:-.}/system/uvarovo_ssl:/app/etc/ssl/uvarovo_ssl
+

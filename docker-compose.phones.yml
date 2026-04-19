@@ -1,0 +1,39 @@
+version: '3.7'
+
+networks:
+  default:
+    name: access-control-network
+
+services:
+  access-phone-trigger-webhook:
+    image: uvarovo/propuskator-phone-trigger-webhook-integration:release
+    container_name: access-phone-trigger-webhook
+    logging: &default-logging
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "20m"
+    restart: always
+    environment:
+      APP_PORT: ${PHONE_TRIGGER_WEBHOOK_PORT:-38080}
+      AUTH_LOGIN: ${PHONE_TRIGGER_WEBHOOK_AUTH_LOGIN:-admin}
+      AUTH_PASSWORD: ${PHONE_TRIGGER_WEBHOOK_AUTH_PASSWORD:-SUPER_SECRET}
+      HANDLER_BASE_URL: ${PHONE_TRIGGER_HANDLER_BASE_URL:-http://access-phone-trigger-handler:48080}
+      PHONE_TRIGGER_NUMBERS: ${READER_PHONE_NUMBERS}
+
+  access-phone-trigger-handler:
+    image: uvarovo/propuskator-phone-trigger-handler-integration:release
+    container_name: access-phone-trigger-handler
+    logging: *default-logging
+    restart: always
+    environment:
+      APP_PORT: ${PHONE_TRIGGER_WEBHOOK_PORT:-48080}
+      MQTT_USER: ${MQTT_ROOT_USERNAME}
+      MQTT_PASS: ${MQTT_ROOT_PASSWORD}
+      MQTT_URI: mqtt://access-emqx:1883
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_HOST: ${DB_HOST:-access-percona}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DIALECT: ${DB_DIALECT:-mysql}

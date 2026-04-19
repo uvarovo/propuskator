@@ -1,0 +1,21 @@
+version: '3.7'
+
+networks:
+  default:
+    name: access-control-network
+
+services:
+  modbus:
+    image: uvarovo/propuskator-modbus-bridge:release
+    container_name: modbus
+    logging: &default-logging
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "20m"
+    privileged: true
+    devices:
+      - MODBUS_DEVICE=${MODBUS_DEVICE:-/dev/ttyUSB0}
+    restart: always
+    env_file:
+      - ${ROOT_DIR:-}/.env_modbus

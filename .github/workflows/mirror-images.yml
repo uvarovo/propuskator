@@ -1,0 +1,128 @@
+name: Mirror upstream images to uvarovo/propuskator-*
+
+# Pulls the abandoned upstream images (hub.docker.com/u/propuskator) and
+# re-publishes them under uvarovo/* on Docker Hub and ghcr.io, so future
+# deployments don't depend on an upstream org we don't control.
+#
+# Run manually: Actions → "Mirror upstream images to uvarovo/propuskator-*"
+# → Run workflow. Or it runs automatically on push to main when this file
+# or the image list changes.
+#
+# Required repo/org secrets:
+#   DOCKERHUB_USERNAME   — uvarovo
+#   DOCKERHUB_TOKEN      — Docker Hub access token with push to uvarovo/*
+# GHCR uses the built-in GITHUB_TOKEN (needs packages: write permission).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Extra immutable tag to publish alongside :release (e.g. 2026-04-19). Leave empty for just :release.'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mirror-images.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        image:
+          # Format: "<upstream-repo>:<upstream-tag>|<mirror-name>"
+          # Main services (used by docker-compose.yml)
+          - 'propuskator/backend:release|propuskator-backend'
+          - 'propuskator/backups:release|propuskator-backups'
+          - 'propuskator/cameras-media-collector:release|propuskator-cameras-media-collector'
+          - 'propuskator/heartbeat:release|propuskator-heartbeat'
+          - 'propuskator/minio-client-service:release|propuskator-minio-client-service'
+          - 'propuskator/minio-service:release|propuskator-minio-service'
+          - 'propuskator/mqtt-proxy:release|propuskator-mqtt-proxy'
+          - 'propuskator/nginx-service:release|propuskator-nginx-service'
+          - 'propuskator/percona-service:release|propuskator-percona-service'
+          - 'propuskator/ssl-certs-service:release|propuskator-ssl-certs-service'
+          - 'propuskator/streamming-service:release|propuskator-streamming-service'
+          - 'propuskator/ui:release|propuskator-ui'
+          - 'propuskator/updater:release|propuskator-updater'
+          - 'propuskator/updater-manager:release|propuskator-updater-manager'
+          # EMQX broker (shared image from 2smartdev, also mirrored under our namespace)
+          - '2smartdev/2smart-standalone-emqx-service:release|propuskator-emqx-service'
+          # Modbus bridge (used by docker-compose.modbus.yml)
+          - 'propuskator/modbus-bridge:release|propuskator-modbus-bridge'
+          # Optional integrations (phones, telegram-bot, google-home)
+          - 'propuskator/phone-trigger-webhook-integration:release|propuskator-phone-trigger-webhook-integration'
+          - 'propuskator/phone-trigger-handler-integration:release|propuskator-phone-trigger-handler-integration'
+          - 'propuskator/telegram-bot-integration:release|propuskator-telegram-bot-integration'
+          - 'propuskator/google-home-integration:release|propuskator-google-home-integration'
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Parse matrix entry
+        id: parse
+        run: |
+          entry='${{ matrix.image }}'
+          src="${entry%%|*}"
+          dst="${entry##*|}"
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+          echo "dst=$dst" >> "$GITHUB_OUTPUT"
+          echo "Mirroring $src  →  uvarovo/$dst  +  ghcr.io/${{ github.repository_owner }}/$dst"
+
+      - name: Pull + retag + push (multi-arch preserved via manifest)
+        env:
+          SRC: ${{ steps.parse.outputs.src }}
+          DST: ${{ steps.parse.outputs.dst }}
+          EXTRA_TAG: ${{ github.event.inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          # Use `docker buildx imagetools create` so we preserve the original
+          # manifest (multi-arch if present) without re-pulling blobs locally.
+          DHUB="docker.io/uvarovo/${DST}:release"
+          GHCR="ghcr.io/${OWNER}/${DST}:release"
+
+          docker buildx imagetools create \
+            --tag "$DHUB" \
+            --tag "$GHCR" \
+            "docker.io/${SRC}"
+
+          if [ -n "${EXTRA_TAG}" ]; then
+            docker buildx imagetools create \
+              --tag "docker.io/uvarovo/${DST}:${EXTRA_TAG}" \
+              --tag "ghcr.io/${OWNER}/${DST}:${EXTRA_TAG}" \
+              "docker.io/${SRC}"
+          fi
+
+          echo "Mirror OK: $DHUB and $GHCR"
+
+  summary:
+    needs: mirror
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror result
+        run: |
+          echo "Mirror job finished. Check individual matrix jobs for per-image status."

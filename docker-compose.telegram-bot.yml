@@ -1,0 +1,30 @@
+version: '3.7'
+
+networks:
+  default:
+    name: access-control-network
+
+services:
+  telegram-bot:
+    image: uvarovo/propuskator-telegram-bot-integration:release
+    container_name: telegram-bot
+    logging: &default-logging
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "20m"
+    restart: always
+    environment:
+      - TELEGRAM_BOT_UPDATE_MODE=${TELEGRAM_BOT_UPDATE_MODE:-polling}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_BASE_URL=${API_URL}
+      - TELEGRAM_BOT_PORT=${TELEGRAM_BOT_PORT:-8080}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - MQTT_USER=${MQTT_ROOT_USERNAME}
+      - MQTT_PASS=${MQTT_ROOT_PASSWORD}
+      - MQTT_URI=${MQTT_URI}
+      - SESSION_COOKIE_SECRET=${ACCESS_TOKEN_SECRET}

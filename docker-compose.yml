@@ -1,0 +1,349 @@
+version: '3.7'
+
+networks:
+  default:
+    name: access-control-network
+
+services:
+  access-emqx:
+    image: uvarovo/propuskator-emqx-service:release
+    container_name: access-emqx
+    logging: &default-logging
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "20m"
+    restart: always
+    environment:
+      - EMQX_NAME=emqx_broker
+      - EMQX_HOST=127.0.0.1
+      - EMQX_LOADED_PLUGINS="emqx_management | emqx_auth_mysql | emqx_recon | emqx_retainer"
+      - EMQX_AUTH__MYSQL__SERVER=${DB_HOST:-access-percona}:${DB_PORT:-3306}
+      - EMQX_AUTH__MYSQL__DATABASE=${MYSQL_DATABASE}
+      - EMQX_AUTH__MYSQL__USERNAME=${MYSQL_USER}
+      - EMQX_AUTH__MYSQL__PASSWORD=${MYSQL_PASSWORD}
+      - EMQX_LISTENER__WS__EXTERNAL__PROXY_PROTOCOL=off
+      - EMQX_LISTENER__WSS__EXTERNAL__PROXY_PROTOCOL=off
+      - EMQX_ENABLE_ACL_CACHE=on
+      - EMQX_ACL_NOMATCH=deny
+      - EMQX_ALLOW_ANONYMOUS=false
+      - WAIT_HOSTS=${DB_HOST:-access-percona}:${DB_PORT:-3306}
+      - WAIT_HOSTS_TIMEOUT=300
+      - EMQX_RETAINER__STORAGE_TYPE=disc
+      - EMQX_ZONE__EXTERNAL__MQUEUE_STORE_QOS0=false
+      - EMQX_ZONE__EXTERNAL__MAX_MQUEUE_LEN=10000
+      - TZ=${TIMEZONE}
+      - EMQX_LISTENER__SSL__EXTERNAL__KEYFILE=${EMQX_SSL_KEY_PATH:-/opt/emqx/etc/ssl/private/server-key.pem}
+      - EMQX_LISTENER__SSL__EXTERNAL__CERTFILE=${EMQX_SSL_CERT_PATH:-/opt/emqx/etc/ssl/certs/server-cert.pem}
+      - EMQX_LISTENER__SSL__EXTERNAL__CACERTFILE=${EMQX_SSL_CA_PATH:-/opt/emqx/etc/ssl/certs/ca.pem}
+      - EMQX_AUTH__MYSQL__ACL_QUERY=select allow, ipaddr, username, clientid, access, topic from mqtt_acl where username = '%u' or username = '$all'
+    ports:
+      - ${EMQX_TCP_PORT:-1883}:1883
+      - ${EMQX_TCP_SSL_PORT:-8883}:8883
+    volumes:
+      - ${ROOT_DIR}/system/emqx/data/mnesia:/opt/emqx/data/mnesia
+      - ${ROOT_DIR}/system/ssl:/opt/emqx/etc/ssl
+
+  access-nginx:
+    image: uvarovo/propuskator-nginx-service:release
+    container_name: access-nginx
+    logging: *default-logging
+    restart: always
+    depends_on:
+      - ssl-certs
+    volumes:
+      - ${ROOT_DIR:-.}/system/ssl:/etc/nginx/ssl
+      - ${ROOT_DIR:-.}/system/releases:/var/tmp/releases
+      - ${ROOT_DIR:-.}/system/shared/nginx:/var/tmp/shared
+    environment:
+      - TZ=${TIMEZONE}
+      - TELEGRAM_BOT_SECRET_PATH=${TELEGRAM_BOT_TOKEN}
+      - MODE=${NGINX_MODE:-default}
+      - REDIRECT_FROM_IP=${NGINX_REDIRECT_FROM_IP}
+      - REDIRECT_TO_HOSTNAME=${NGINX_REDIRECT_TO_HOSTNAME}
+      - NGINX_SSL_CERT=${NGINX_SSL_CERT}
+      - NGINX_SSL_CERT_KEY=${NGINX_SSL_CERT_KEY}
+    ports:
+      - ${NGINX_HTTP_PORT:-80}:80
+      - ${NGINX_HTTPS_PORT:-443}:443
+
+  access-percona:
+    image: uvarovo/propuskator-percona-service:release
+    container_name: access-percona
+    logging: *default-logging
+    restart: always
+    environment:
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - TZ=${TIMEZONE}
+    volumes:
+      - ${ROOT_DIR:-.}/system/mysql:/var/lib/mysql
+
+  ssl-certs:
+    image: uvarovo/propuskator-ssl-certs-service:release
+    container_name: ssl-certs
+    logging: *default-logging
+    environment:
+      - DNS=${DNS:-localhost}
+    volumes:
+      - ${ROOT_DIR:-.}/system/ssl/certs:/app/certs
+      - ${ROOT_DIR:-.}/system/ssl/private:/app/private
+
+  access-ui:
+    image: uvarovo/propuskator-ui:release
+    container_name: access-ui
+    logging: *default-logging
+    restart: always
+    environment:
+      - API_URL=${API_URL_UI:-.}
+      - API_PREFIX=${API_PREFIX:-/api/v1/admin/}
+      - UPDATER_API_URL=${UPDATER_API_URL:-.}
+      - UPDATER_API_PREFIX=${UPDATER_API_PREFIX:-/updater/v1/}
+      - TZ=${TIMEZONE}
+
+  access-heartbeat:
+    image: uvarovo/propuskator-heartbeat:release
+    container_name: access-heartbeat
+    logging: *default-logging
+    restart: always
+    environment:
+      - MQTT_USER=${MQTT_ROOT_USERNAME}
+      - MQTT_PASS=${MQTT_ROOT_PASSWORD}
+      - MQTT_URI=mqtt://access-emqx:1883
+      - TZ=${TIMEZONE}
+      - MODE=${HEARTBEAT_MODE:-optimized}
+      - HEARTBEAT_DEBUG=${HEARTBEAT_DEBUG:-*}
+      - HEARTBEAT_TIMEOUT=${HEARTBEAT_TIMEOUT:-30000}
+      - INIT_TIME=${HEARTBEAT_INIT_TIME:-30000}
+
+  access-backend:
+    image: uvarovo/propuskator-backend:release
+    container_name: access-backend
+    logging: *default-logging
+    restart: always
+    environment:
+      - WAIT_HOSTS=${DB_HOST:-access-percona}:${DB_PORT:-3306}
+      - DNS=${DNS:-localhost}
+      - API_URL=${API_URL}
+      - DEEP_LINK_HOST_URL=${DEEP_LINK_HOST_URL}
+      - PORT=${PORT:-8000}
+      - ACCESS_TOKEN_SECRET=${ACCESS_TOKEN_SECRET}
+      - ADMIN_PASSWORD_RESET_TOKEN_SECRET=${ADMIN_PASSWORD_RESET_TOKEN_SECRET}
+      - MOBILE_PASSWORD_RESET_TOKEN_SECRET=${MOBILE_PASSWORD_RESET_TOKEN_SECRET}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USERNAME=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_HOST=${DB_HOST:-access-percona}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_DIALECT=${DB_DIALECT:-mysql}
+      - TZ=${TIMEZONE}
+      - WAIT_HOSTS_TIMEOUT=${WAIT_HOSTS_TIMEOUT:-300}
+      - TOKEN_READER_ACTIVE_PERIOD_SECONDS=${TOKEN_READER_ACTIVE_PERIOD_SECONDS:-180}
+      - ACCESS_TOKEN_LIFETIME=${ACCESS_TOKEN_LIFETIME:-1200}
+      - ROOT_SSL_CERT_PATH=${ROOT_SSL_CERT_PATH:-/app/etc/ssl/certs/ca.pem}
+      - MQTT_ROOT_PASSWORD=${MQTT_ROOT_PASSWORD}
+      - MQTT_ROOT_USERNAME=${MQTT_ROOT_USERNAME}
+      - MQTT_BROKER_URI=mqtt://access-emqx:1883
+      - EMQX_TCP_PORT=${EMQX_TCP_PORT:-1883}
+      - MAIL_OPTIONS_TRANSPORT_TYPE=${MAIL_OPTIONS_TRANSPORT_TYPE:-SMTP}
+      - MAIL_OPTIONS_TRANSPORT_OPTIONS_PORT=${MAIL_OPTIONS_TRANSPORT_OPTIONS_PORT:-}
+      - MAIL_OPTIONS_TRANSPORT_OPTIONS_HOST=${MAIL_OPTIONS_TRANSPORT_OPTIONS_HOST}
+      - MAIL_OPTIONS_TRANSPORT_OPTIONS_AUTH_USER=${MAIL_OPTIONS_TRANSPORT_OPTIONS_AUTH_USER}
+      - MAIL_OPTIONS_TRANSPORT_OPTIONS_AUTH_PASS=${MAIL_OPTIONS_TRANSPORT_OPTIONS_AUTH_PASS}
+      - MAIL_OPTIONS_FROM=${MAIL_OPTIONS_FROM}
+      - REPORT_RECIEVER_EMAIL=${REPORT_RECIEVER_EMAIL}
+      - REPORT_SEND_INTERVAL=${REPORT_SEND_INTERVAL}
+      - CHECK_STREAMS_INTERVAL_MS=${CHECK_STREAMS_INTERVAL_MS:-30000}
+      - CHECK_STREAMS_TIMEOUT_MS=${CHECK_STREAMS_TIMEOUT_MS:-5000}
+      - FAILED_CHECK_STREAM_RETRIES=${FAILED_CHECK_STREAM_RETRIES:-3}
+      - RESET_PASSWORD_INTERVAL=${RESET_PASSWORD_INTERVAL:-300}
+      - COLLECT_FRAMES_INTERVAL=${COLLECT_FRAMES_INTERVAL:-300000}
+      - COLLECT_FRAMES_CONCURRENT_PROCS_NUMBER=${COLLECT_FRAMES_CONCURRENT_PROCS_NUMBER:-5}
+      - COLLECT_FRAMES_PROC_TIMEOUT=${COLLECT_FRAMES_PROC_TIMEOUT:-60000}
+      - ATTEMPTS_INTERVAL=${ATTEMPTS_INTERVAL:-60}
+      - ATTEMPTS_COUNT=${ATTEMPTS_COUNT:-5}
+      - ATTEMPTS_BLOCKED_TIME=${ATTEMPTS_BLOCKED_TIME:-300}
+      - DEFAULT_ENVS_FILE_PATH=${DEFAULT_ENVS_FILE_PATH:-/app/.env.defaults}
+      - READER_PHONE_NUMBERS=${READER_PHONE_NUMBERS}
+      - MQTT_SYNC_MAX_DELAY=${MQTT_SYNC_MAX_DELAY:-10000}
+      - MQTT_SYNC_RESET_TIMEOUT=${MQTT_SYNC_RESET_TIMEOUT:-1000}
+      - MEDIA_DIR_PATH=${MEDIA_DIR_PATH:-/app/media}
+      - S3_ENDPOINT=http://${MINIO_HOST}:${MINIO_PORT}
+      - S3_BUCKET=${MINIO_BUCKET}
+      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - LOGS_RECORDED_FRAMES_TO_SAVE_NUMBER=${LOGS_RECORDED_FRAMES_TO_SAVE_NUMBER:-3}
+      - LOGS_RECORDED_VIDEOS_TO_SAVE_NUMBER=${LOGS_RECORDED_VIDEOS_TO_SAVE_NUMBER:-2}
+      - CAMERAS_MEDIA_COLLECT_FRAMES_INTERVAL_TIME=${CAMERAS_MEDIA_COLLECT_FRAMES_INTERVAL_TIME}
+      - CAMERAS_MEDIA_COLLECT_FRAMES_ACCURACY_TIME=${CAMERAS_MEDIA_COLLECT_FRAMES_ACCURACY_TIME}
+      - CAMERAS_MEDIA_VIDEO_SEGMENT_TIME=${CAMERAS_MEDIA_VIDEO_SEGMENT_TIME}
+      - SERVICES_TOKEN_LIFETIME=${SERVICES_TOKEN_LIFETIME:-1200}
+      - MODBUS_SERVICE_TOKEN=${MODBUS_SERVICE_TOKEN}
+      - QR_CODES_ERROR_CORRECTION_LEVEL=${QR_CODES_ERROR_CORRECTION_LEVEL}
+      - USER_REQUESTS_REGISTRATION_ATTEMPTS_COUNT=${USER_REQUESTS_REGISTRATION_ATTEMPTS_COUNT}
+    ports:
+      - 8000:8000
+    volumes:
+      - ${ROOT_DIR:-.}/system/storage:/app/storage
+      - ${ROOT_DIR:-.}/system/ssl/certs:/app/etc/ssl/certs
+      - ${ROOT_DIR:-.}/system/media:${MEDIA_DIR_PATH:-/app/media}
+
+  access-backups:
+    image: uvarovo/propuskator-backups:release
+    container_name: access-backups
+    logging: *default-logging
+    restart: always
+    environment:
+      - MYSQL_HOST=${DB_HOST}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - BACKUPS_DIR_PATH=${BACKUPS_DIR_PATH}
+      - BACKUPS_LIFE_DAYS=${BACKUPS_LIFE_DAYS:-30}
+      - STORAGE_DIR_PATH=${STORAGE_DIR_PATH:-/app/storage}
+      - TZ=${TIMEZONE}
+      - UPLOAD_BACKUPS_TO_DO=${UPLOAD_BACKUPS_TO_DO:-0}
+      - DO_SPACE_ENDPOINT=${DO_SPACE_ENDPOINT}
+      - DO_SPACE_ACCESS_KEY_ID=${DO_SPACE_ACCESS_KEY_ID}
+      - DO_SPACE_SECRET_ACCESS_KEY=${DO_SPACE_SECRET_ACCESS_KEY}
+      - DO_SPACE_BUCKET=${DO_SPACE_BUCKET}
+      - DO_SPACE_ROOT_PROJECT_FOLDER=${DO_SPACE_ROOT_PROJECT_FOLDER}
+      - ENCRYPT_KEYS_EMAIL=${ENCRYPT_KEYS_EMAIL}
+      - ENCRYPT_KEYS_FOLDER=${ENCRYPT_KEYS_FOLDER:-/app/keys}
+      - GPG_PUBLIC_KEY_FILENAME=${GPG_PUBLIC_KEY_FILENAME:-public_key.gpg}
+      - BACKUP_DAILY=${BACKUP_DAILY:-1}
+      - BACKUP_WEEKLY=${BACKUP_WEEKLY:-1}
+      - BACKUP_MONTHLY=${BACKUP_MONTHLY:-1}
+    volumes:
+      - ${ROOT_DIR:-.}/system/backups:${BACKUPS_DIR_PATH}
+      - ${ROOT_DIR:-.}/system/keys:${ENCRYPT_KEYS_FOLDER:-/app/keys}
+      - ${ROOT_DIR:-.}/system/storage:${STORAGE_DIR_PATH:-/app/storage}
+
+  access-streamming-service:
+    image: uvarovo/propuskator-streamming-service:release
+    container_name: access-streamming-service
+    logging: *default-logging
+    restart: always
+    environment:
+      - WAIT_HOSTS=${DB_HOST:-access-percona}:${DB_PORT:-3306}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USERNAME=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_HOST=${DB_HOST:-access-percona}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_DIALECT=${DB_DIALECT:-mysql}
+      - TZ=${TIMEZONE}
+      - WAIT_HOSTS_TIMEOUT=${WAIT_HOSTS_TIMEOUT:-300}
+      - ACCESS_TOKEN_SECRET=${ACCESS_TOKEN_SECRET}
+      - ACCESS_TOKEN_LIFETIME=${ACCESS_TOKEN_LIFETIME:-1200}
+
+  cameras-media-collector:
+    image: uvarovo/propuskator-cameras-media-collector:release
+    container_name: cameras-media-collector
+    logging: *default-logging
+    restart: always
+    environment: 
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - MEDIA_DIR_PATH=${MEDIA_DIR_PATH:-/app/media}
+      - CAMERAS_MEDIA_COLLECT_FRAMES_INTERVAL_TIME=${CAMERAS_MEDIA_COLLECT_FRAMES_INTERVAL_TIME}
+      - CAMERAS_MEDIA_VIDEO_SEGMENT_TIME=${CAMERAS_MEDIA_VIDEO_SEGMENT_TIME}
+      - CAMERAS_MEDIA_RESTART_PROCESSES_TIMEOUT=${CAMERAS_MEDIA_RESTART_PROCESSES_TIMEOUT:-30}
+      - CHECK_RTSP_URL_CHANGES_INTERVAL_TIME=${CHECK_RTSP_URL_CHANGES_INTERVAL_TIME:-30}
+      - CAMERAS_MEDIA_COLLECT_FOR_CAMERAS_WITH_ASSIGNED_TOKEN_READER=${CAMERAS_MEDIA_COLLECT_FOR_CAMERAS_WITH_ASSIGNED_TOKEN_READER:-false}
+      - CAMERAS_MEDIA_FILES_LIFE_MINUTES=${CAMERAS_MEDIA_FILES_LIFE_MINUTES:-1440}
+      - TZ=${TIMEZONE}
+    volumes:
+      - ${ROOT_DIR}/system/media:${MEDIA_DIR_PATH:-/app/media}
+
+  access-updater:
+    image: uvarovo/propuskator-updater:release
+    container_name: access-updater
+    logging: *default-logging
+    restart: always
+    environment:
+      - UPDATER_PORT=${UPDATER_PORT:-28080}
+      - GITLAB_REGISTRY_HOST=${GITLAB_REGISTRY_HOST}
+      - GITLAB_SERVER_USER=${GITLAB_SERVER_USER}
+      - GITLAB_SERVER_PASS=${GITLAB_SERVER_PASS}
+      - TZ=${TIMEZONE}
+      - STORAGE_URL=${RELEASES_BASE_URL:-http://access-nginx}
+      - CHANGELOG_PATH=${RELEASES_CHANGELOG_PATH:-releases/changelog}
+      - DOCKER_COMPOSES_PATH=${RELEASES_DOCKER_COMPOSES_PATH:-releases/composes}
+      - RELEASES_LIST_PATH=${RELEASES_LIST_PATH:-releases/releases-list.csv}
+      - IGNORE_YML_FILES=${UPDATER_IGNORE_YML_FILES}
+      - SYNC_YML_FILES=${UPDATER_SYNC_YML_FILES:-docker-compose.yml}
+      - PROJECT_NAME=${COMPOSER_PROJECT_NAME:-access-control}
+      - UPDATER_SERVICE_NAME=${UPDATER_SERVICE_NAME:-access-updater}
+      - SERVICE_MANAGER_NAME=${UPDATER_SERVICE_MANAGER_NAME:-access-updater-manager}
+      - MAIN_COMPOSE_FILE=${UPDATER_MAIN_COMPOSE_FILE:-docker-compose.yml}
+    volumes:
+      - ${DOCKER_DIR:-/var/lib/docker}:/var/lib/docker
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${ROOT_DIR}:/propuskator
+      - ${ROOT_DIR}/system/updater:/app/data
+
+  access-updater-manager:
+    image: uvarovo/propuskator-updater-manager:release
+    container_name: access-updater-manager
+    logging: *default-logging
+    environment:
+      - TZ=${TIMEZONE}
+      - UPDATER_SERVICE_NAME=${UPDATER_SERVICE_NAME:-access-updater}
+      - PROJECT_NAME=${COMPOSER_PROJECT_NAME:-cloud}
+    volumes:
+      - ${DOCKER_DIR:-/var/lib/docker}:/var/lib/docker
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${ROOT_DIR}:/propuskator
+
+  access-mqtt-proxy:
+    image: uvarovo/propuskator-mqtt-proxy:release
+    container_name: access-mqtt-proxy
+    logging: *default-logging
+    restart: always
+    environment:
+      - WAIT_HOSTS=${DB_HOST:-access-percona}:${DB_PORT:-3306}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USERNAME=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_HOST=${DB_HOST:-access-percona}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_DIALECT=${DB_DIALECT:-mysql}
+      - TZ=${TIMEZONE}
+      - WAIT_HOSTS_TIMEOUT=${WAIT_HOSTS_TIMEOUT:-300}
+      - MQTT_ROOT_PASSWORD=${MQTT_ROOT_PASSWORD}
+      - MQTT_ROOT_USERNAME=${MQTT_ROOT_USERNAME}
+      - MQTT_BROKER_URI=mqtt://access-emqx:1883
+      - AEDES_WS_PORT=${AEDES_WS_PORT:-8083}
+      - MAX_ADDITIONAL_RELAYS_NUMBER=${MAX_ADDITIONAL_RELAYS_NUMBER:-50}
+
+  access-minio:
+    image: uvarovo/propuskator-minio-service:release
+    container_name: access-minio
+    logging: *default-logging
+    restart: always
+    command: minio server /data
+    environment: 
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ${ROOT_DIR}/system/minio:/data
+
+  access-minio-client:
+    image: uvarovo/propuskator-minio-client-service:release
+    container_name: access-minio-client
+    logging: *default-logging
+    depends_on: 
+      - access-minio
+    environment:
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
